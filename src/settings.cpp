@@ -21,8 +21,9 @@
 Settings settings;
 
 static constexpr uint32_t SETTINGS_MAGIC = 0x53504431;  // "SPD1"
-static constexpr uint16_t SETTINGS_VERSION = 5;
+static constexpr uint16_t SETTINGS_VERSION = 6;
 static constexpr size_t SETTINGS_V4_SIZE = offsetof(Settings, fixSettleSec);  // v5 only appended fields
+static constexpr size_t SETTINGS_V5_SIZE = offsetof(Settings, simSpeed);      // v6 only appended fields
 
 struct DayPreset { const char* name; ThemeColours c; };
 
@@ -81,6 +82,8 @@ void settingsLoad() {
   size_t len = p.getBytesLength("cfg");
   if (magic == SETTINGS_MAGIC && ver == SETTINGS_VERSION && len == sizeof(Settings)) {
     p.getBytes("cfg", &settings, sizeof(Settings));
+  } else if (magic == SETTINGS_MAGIC && ver == 5 && len == SETTINGS_V5_SIZE) {
+    p.getBytes("cfg", &settings, len);
   } else if (magic == SETTINGS_MAGIC && ver == 4 && len == SETTINGS_V4_SIZE) {
     // Version 4: everything up to the trip; the newer fields keep their defaults
     p.getBytes("cfg", &settings, len);
@@ -142,6 +145,19 @@ void settingsSave() {
 }
 
 void settingsSaveTrip() { settingsSave(); }
+
+void settingsResetConfig() {
+  Settings keep = settings;
+  settingsDefaults(settings);
+  memcpy(settings.wifi, keep.wifi, sizeof(settings.wifi));
+  memcpy(settings.otaPass, keep.otaPass, sizeof(settings.otaPass));
+  settings.lastLat = keep.lastLat;
+  settings.lastLon = keep.lastLon;
+  settings.tripMeters = keep.tripMeters;
+  settings.tripMovingSec = keep.tripMovingSec;
+  settings.tripMaxMs = keep.tripMaxMs;
+  settingsSave();
+}
 
 const char* designName(uint8_t d) {
   static const char* N[DESIGN_COUNT] = {"A Clean", "B Gauge", "B Gauge solid", "C Info", "D Night"};

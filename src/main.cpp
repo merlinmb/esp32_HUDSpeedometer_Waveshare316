@@ -16,6 +16,7 @@
 #include "telemetry.h"
 #include "net.h"
 #include "ui.h"
+#include <ArduinoJson.h>
 
 // LovyanGFX copies each VLW glyph onto the stack (alloca(w * h)). The speed digits are up
 // to 26.9 KB and the update-screen digits 14.6 KB, more than the default 8 KB loop stack:
@@ -380,6 +381,12 @@ static void handleButton(uint8_t event) {
 //   wifi1 "Phone hotspot name" "password"     Network 1 (phone hotspot)
 //   wifi2 "Home network" "password"           Network 2 (home)
 //   clear1 / clear2   status   ota "new-password"   reboot   help
+// Settings, using the same keys as the web page's /api/settings JSON (nested with a dot).
+// Changes apply at once and are saved:
+//   get                      all settings as JSON        get hud.gauge    one value
+//   set simSpeed on          set alertLimit 70           set hud.colour #FF8000
+//   set tz "GMT0BST,M3.5.0/1,M10.5.0"   (quote values that contain spaces)
+//   reset config             defaults for everything except Wi-Fi networks, OTA password and trip
 static int splitArgs(char* line, char* argv[], int max) {
   int n = 0;
   char* p = line;
@@ -396,6 +403,50 @@ static int splitArgs(char* line, char* argv[], int max) {
     if (*p) *p++ = 0;
   }
   return n;
+}
+
+// Looks up "key" or "group.key" in the settings JSON.
+static JsonVariant settingAt(JsonDocument& d, const String& key) {
+  int dot = key.indexOf('.');
+  if (dot < 0) return d[key];
+  return d[key.substring(0, dot)][key.substring(dot + 1)];
+}
+
+static void printSetting(const String& key) {
+  JsonDocument d;
+  settingsJson(d);
+  JsonVariant v = settingAt(d, key);
+  if (v.isNull()) { Serial.printf("Unknown setting \"%s\" (type 'get' for the list)\n", key.c_str()); return; }
+  Serial.printf("%s = ", key.c_str());
+  serializeJson(v, Serial);
+  Serial.println();
+}
+
+static void setSetting(const String& key, const char* text) {
+  JsonDocument cur;
+  settingsJson(cur);
+  JsonVariant old = settingAt(cur, key);
+  bool writeOnly = key == "apiToken" || key == "otaPass";
+  if (old.isNull() && !writeOnly) { Serial.printf("Unknown setting \"%s\" (type 'get' for the list)\n", key.c_str()); return; }
+
+  // Booleans accept on/off, strings are taken as typed, anything else is read as JSON (numbers)
+  String t = text;
+  t.toLowerCase();
+  JsonDocument val;
+  if (old.is<bool>() && (t == "on" || t == "yes" || t == "1" || t == "true")) val.set(true);
+  else if (old.is<bool>() && (t == "off" || t == "no" || t == "0" || t == "false")) val.set(false);
+  else if (old.is<const char*>() || writeOnly || deserializeJson(val, text)) val.set(text);
+
+  JsonDocument in;
+  int dot = key.indexOf('.');
+  if (dot < 0) in[key] = val;
+  else in[key.substring(0, dot)][key.substring(dot + 1)] = val;
+
+  settingsFromJson(in.as<JsonObject>());
+  settingsSave();
+  applySettingsChanges();
+  if (writeOnly) Serial.printf("%s saved\n", key.c_str());
+  else printSetting(key);
 }
 
 static void serialConsole() {
@@ -437,12 +488,22 @@ static void serialConsole() {
                     netConnected() ? netSsid().c_str() : "", netConnected() ? netIp().c_str() : "");
       Serial.printf("Hostname: %s.local\n", settings.deviceName);
       Serial.printf("GPS: %s, %u sats, %.1f Hz, RX G%d @ %lu\n", gps.fix ? "fix" : "no fix", gps.sats, gps.measuredHz, gps.rxPin, (unsigned long)gps.baud);
+    } else if (cmd == "get") {
+      if (argc >= 2) printSetting(argv[1]);
+      else { JsonDocument d; settingsJson(d); serializeJsonPretty(d, Serial); Serial.println(); }
+    } else if (cmd == "set" && argc >= 3) {
+      setSetting(argv[1], argv[2]);
+    } else if (cmd == "reset" && argc >= 2 && !strcasecmp(argv[1], "config")) {
+      settingsResetConfig();
+      applySettingsChanges();
+      Serial.println("Settings reset to defaults (Wi-Fi networks, OTA password and trip kept)");
     } else if (cmd == "reboot") {
       Serial.println("Restarting");
       delay(200);
       ESP.restart();
     } else {
       Serial.println("Commands: wifi1 \"name\" \"pass\" | wifi2 \"name\" \"pass\" | clear1 | clear2 | ota \"pass\" | status | reboot");
+      Serial.println("Settings: get | get <key> | set <key> <value> | reset config   (keys as in 'get', nested as hud.gauge)");
     }
   }
 }
@@ -491,26 +552,39 @@ void loop() {
 #endif
 
   bool newSample = gpsPoll();
+  float sampleMs = gps.speedMs;
+  // Simulated speed (web page or serial 'set simSpeed on'): replaces the GPS samples at the GPS
+  // rate and counts as a fix. Sweeps 0 -> 36 m/s (~80 mph) -> 0 every 40 s. No trip or telemetry.
+  bool sim = settings.simSpeed;
+  bool fix = gps.fix || sim;
+  if (sim) {
+    static uint32_t simLastMs = 0;
+    newSample = now - simLastMs >= 1000u / settings.gpsHz;
+    if (newSample) {
+      simLastMs = now;
+      sampleMs = 18.0f * (1.0f - cosf(2.0f * PI * (now % 40000) / 40000.0f));
+    }
+  }
   // A fresh fix reports a few mph of speed while standing still. Ignore the speed until the
   // fix has settled.
   static uint32_t fixSinceMs = 0;
-  if (!gps.fix) fixSinceMs = 0;
+  if (!fix) fixSinceMs = 0;
   else if (!fixSinceMs) fixSinceMs = now;
   if (newSample) {
     static uint32_t lastSampleMs = 0;
     bool trusted = now - fixSinceMs >= (uint32_t)settings.fixSettleSec * 1000;
-    filter.addSample(trusted ? gps.speedMs : 0, now, false);
+    filter.addSample(trusted ? sampleMs : 0, now, false);
     float dt = lastSampleMs ? (now - lastSampleMs) / 1000.0f : 0;
     lastSampleMs = now;
     float v = filter.filteredMs();
-    if (dt > 0 && dt < 2.0f && v > 0.5f) {
+    if (!sim && dt > 0 && dt < 2.0f && v > 0.5f) {
       settings.tripMeters += v * dt;
       settings.tripMovingSec += dt;
       if (v > settings.tripMaxMs) settings.tripMaxMs = v;
       tripDirty = true;
     }
   }
-  if (!gps.fix) filter.reset();
+  if (!fix) filter.reset();
   filter.tick(now);
   syncClock(now);
 
@@ -554,7 +628,7 @@ void loop() {
   bool night = hud ? autoNightActive() : design == DESIGN_D;
 
   // --- speed alert ---
-  bool over = settings.alertLimit && gps.fix && speedInt > settings.alertLimit;
+  bool over = settings.alertLimit && fix && speedInt > settings.alertLimit;
   if (over && !alerted && settings.alertMode != AlertMode::Off) {
     alerted = true;
     showToast("Speed alert limit reached", 2200);
@@ -566,7 +640,7 @@ void loop() {
   if (gps.fix) { settings.lastLat = gps.lat; settings.lastLon = gps.lon; }
   if (tripDirty && now - lastSave > 120000) { lastSave = now; tripDirty = false; settingsSaveTrip(); }
 
-  if (settings.telemetryEnabled && gps.fix && timeSet && now - lastSample >= (uint32_t)settings.sampleSec * 1000) {
+  if (settings.telemetryEnabled && !sim && gps.fix && timeSet && now - lastSample >= (uint32_t)settings.sampleSec * 1000) {
     lastSample = now;
     TelemetryPoint p;
     p.utc = (uint32_t)utc;
@@ -582,7 +656,7 @@ void loop() {
 
   liveData.speed = speedInt;
   liveData.sats = gps.sats;
-  liveData.fix = gps.fix;
+  liveData.fix = fix;
   liveData.hz = gps.measuredHz;
   liveData.brightnessPct = brightness.percent();
   liveData.night = night;
@@ -610,7 +684,7 @@ void loop() {
     strcpy(m.heading, "--");
   }
   m.gpsConnected = gps.connected;
-  m.fix = gps.fix;
+  m.fix = fix;
   m.speed = speedInt;
   m.ringValue = roundf(filter.displayMs() * unitsPerMs * 4) / 4;   // quarter-unit steps: smooth but not every frame
   m.ringMax = settings.units == Units::MPH ? 120 : 200;
@@ -640,6 +714,8 @@ void loop() {
   if (gps.fix) snprintf(m.altVal, sizeof(m.altVal), "%.0f", gps.altM); else strcpy(m.altVal, "--");
   if (now < toastUntil) {
     strncpy(m.toast, toast, sizeof(m.toast) - 1);
+  } else if (sim) {
+    strcpy(m.toast, "SIMULATED SPEED");   // never mistake it for the real speed
   }
   // Brightness nudge feedback
   static int8_t lastOffset = settings.brightOffset;

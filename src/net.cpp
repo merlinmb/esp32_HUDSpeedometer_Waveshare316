@@ -140,7 +140,7 @@ static bool hudFromJson(JsonObject o, HudSettings& h) {
   return true;
 }
 
-static void settingsJson(JsonDocument& d) {
+void settingsJson(JsonDocument& d) {
   d["units"] = (int)settings.units;
   d["design"] = settings.design;
   d["autoNight"] = settings.autoNight;
@@ -155,6 +155,7 @@ static void settingsJson(JsonDocument& d) {
   d["rotation"] = settings.rotation;
   d["speedOffset"] = settings.speedOffset;
   d["resetTripOnSleep"] = settings.resetTripOnSleep;
+  d["simSpeed"] = settings.simSpeed;
   d["alertMode"] = (int)settings.alertMode;
   d["alertLimit"] = settings.alertLimit;
   d["idleDimMin"] = settings.idleDimMin;
@@ -186,18 +187,9 @@ static void copyStr(char* dst, size_t n, const char* src) {
   dst[n - 1] = 0;
 }
 
-// ---------- HTTP handlers ----------
-static void hRoot() { server.send_P(200, "text/html", WEB_PAGE); }
-
-static void hGetSettings() {
-  JsonDocument d;
-  settingsJson(d);
-  sendJson(d);
-}
-
-static void hPostSettings() {
-  JsonDocument in;
-  if (deserializeJson(in, server.arg("plain"))) { server.send(400, "text/plain", "bad json"); return; }
+// Changes only the fields present; out-of-range values are clamped. Shared by the web page
+// and the serial console. Does not save.
+void settingsFromJson(JsonObject in) {
   if (in["units"].is<int>()) settings.units = (Units)constrain(in["units"].as<int>(), 0, 1);
   if (in["design"].is<int>()) settings.design = constrain(in["design"].as<int>(), 0, DESIGN_COUNT - 1);
   if (in["autoNight"].is<bool>()) settings.autoNight = in["autoNight"];
@@ -212,6 +204,7 @@ static void hPostSettings() {
   if (in["rotation"].is<int>()) settings.rotation = in["rotation"].as<int>() >= 2 ? 2 : 0;
   if (in["speedOffset"].is<int>()) settings.speedOffset = constrain(in["speedOffset"].as<int>(), -10, 10);
   if (in["resetTripOnSleep"].is<bool>()) settings.resetTripOnSleep = in["resetTripOnSleep"];
+  if (in["simSpeed"].is<bool>()) settings.simSpeed = in["simSpeed"];
   if (in["alertMode"].is<int>()) settings.alertMode = (AlertMode)constrain(in["alertMode"].as<int>(), 0, 2);
   if (in["idleDimMin"].is<int>()) settings.idleDimMin = constrain(in["idleDimMin"].as<int>(), 0, 60);
   if (in["idleOffMin"].is<int>()) settings.idleOffMin = constrain(in["idleOffMin"].as<int>(), 0, 60);
@@ -229,6 +222,21 @@ static void hPostSettings() {
   coloursFromJson(in["day"], settings.day);
   coloursFromJson(in["night"], settings.night);
   hudFromJson(in["hud"], settings.hud);
+}
+
+// ---------- HTTP handlers ----------
+static void hRoot() { server.send_P(200, "text/html", WEB_PAGE); }
+
+static void hGetSettings() {
+  JsonDocument d;
+  settingsJson(d);
+  sendJson(d);
+}
+
+static void hPostSettings() {
+  JsonDocument in;
+  if (deserializeJson(in, server.arg("plain"))) { server.send(400, "text/plain", "bad json"); return; }
+  settingsFromJson(in.as<JsonObject>());
   settingsSave();
   netSettingsChanged = true;
   hGetSettings();
@@ -345,6 +353,12 @@ static void hStatus() {
   sendJson(d);
 }
 
+static void hSettingsReset() {
+  settingsResetConfig();
+  netSettingsChanged = true;
+  hGetSettings();
+}
+
 static void hTripReset() {
   netTripResetRequested = true;
   JsonDocument d;
@@ -436,6 +450,7 @@ static void startServer() {
   server.on("/", HTTP_GET, hRoot);
   server.on("/api/settings", HTTP_GET, hGetSettings);
   server.on("/api/settings", HTTP_POST, hPostSettings);
+  server.on("/api/settings/reset", HTTP_POST, hSettingsReset);
   server.on("/api/presets", HTTP_GET, hPresets);
   server.on("/api/hud", HTTP_POST, hHud);
   server.on("/api/scan", HTTP_GET, hScan);

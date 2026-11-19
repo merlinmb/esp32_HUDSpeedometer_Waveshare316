@@ -118,6 +118,9 @@ struct Settings {
   int8_t speedOffset = 0;           // whole display units added to the shown speed, -10..+10
   bool resetTripOnSleep = true;     // clear the trip when the screen turns off while parked
   HudSettings hud;
+
+  // ---- Added in settings version 6 ----
+  bool simSpeed = false;            // show a simulated speed instead of GPS (for testing)
 };
 
 extern Settings settings;
@@ -126,6 +129,7 @@ void settingsDefaults(Settings& s);
 void settingsLoad();
 void settingsSave();
 void settingsSaveTrip();
+void settingsResetConfig();       // defaults for everything except Wi-Fi networks, OTA password, trip and last position; saves
 void hudSanitise(HudSettings& h);  // clamps every HUD value into range          // light-weight save of trip + last position
 
 // Colour presets selectable on the device. The web page can set any colour.

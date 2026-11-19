@@ -93,6 +93,7 @@ button.sec{background:#25303a;color:var(--txt)}
 <label>Dim after stopped for (min, 0 = never)<input type="number" id="idleDimMin" min="0" max="60"></label>
 <label>Then screen off after (min, 0 = stay dim)<input type="number" id="idleOffMin" min="0" max="60"></label>
 <label>Reset trip when the screen turns off<input type="checkbox" id="resetTripOnSleep"></label>
+<label>Simulated speed (for testing; ignores GPS, applies at once)<input type="checkbox" id="simSpeed"></label>
 </section>
 
 <section><h2>Colours</h2>
@@ -113,7 +114,7 @@ button.sec{background:#25303a;color:var(--txt)}
 <div class="sub" id="tele"></div>
 </section>
 
-<div class="row"><button onclick="save()">Save settings</button><button class="sec" onclick="post('/api/trip/reset',{}).then(()=>toast('Trip reset'))">Reset trip</button></div>
+<div class="row"><button onclick="save()">Save settings</button><button class="sec" onclick="post('/api/trip/reset',{}).then(()=>toast('Trip reset'))">Reset trip</button><button class="sec" onclick="resetCfg()">Reset settings to defaults</button></div>
 <p class="sub">Tip: hold the BOOT key to open settings. Wi-Fi setup is in that menu.</p>
 </main><div id="toast"></div>
 <script>
@@ -124,7 +125,7 @@ function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';set
 async function get(u){const r=await fetch(u);return r.json()}
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json()}
 const FIELDS=['units','rotation','design','nightBelowDeg','brightMode','fixedLevel','gpsHz','smoothing','fixSettleSec','startSpeedMs','startHoldMs','speedOffset','alertMode','alertLimit','idleDimMin','idleOffMin','apiUrl','sampleSec','uploadSec','deviceName','tz'];
-const CHECKS=['wifiEnabled','telemetryEnabled','preferHome','autoNight','resetTripOnSleep'];
+const CHECKS=['wifiEnabled','telemetryEnabled','preferHome','autoNight','resetTripOnSleep','simSpeed'];
 // HUD: [key, label, min, max, step, no-correction value]
 const HS=[['scaleX','Width',0.5,1.5,0.01,1],['scaleY','Height (rake squashes it)',0.5,1.5,0.01,1],
 ['keystone','Keystone (+ top wider)',-0.5,0.5,0.01,0],['taper','Side taper (+ right taller)',-0.5,0.5,0.01,0],
@@ -175,6 +176,9 @@ async function save(){FIELDS.forEach(f=>{const e=$(f);if(!e)return;S[f]=(e.type=
 CHECKS.forEach(f=>S[f]=$(f).checked);const tok=$('apiToken').value;const b=Object.assign({},S);if(tok)b.apiToken=tok;
 const op=$('otaPass').value;if(op){if(op.length<6){toast('OTA password needs 6+ characters');return}b.otaPass=op}delete b.networks;
 S=await post('/api/settings',b);$('apiToken').value='';$('otaPass').value='';toast('Saved');tab(cur)}
+async function resetCfg(){if(!confirm('Reset all settings to defaults? Wi-Fi networks, OTA password and trip are kept.'))return;
+S=await post('/api/settings/reset',{});await load();toast('Settings reset')}
+$('simSpeed').onchange=async()=>{const r=await post('/api/settings',{simSpeed:$('simSpeed').checked});S.simSpeed=r.simSpeed;toast(r.simSpeed?'Simulated speed on':'Simulated speed off')};
 async function scan(){$('scanstate').textContent='Scanning...';let r;for(let i=0;i<20;i++){r=await get('/api/scan');if(!r.scanning)break;await new Promise(z=>setTimeout(z,700))}
 $('scanstate').textContent='';const d=$('scan');d.innerHTML='';(r.networks||[]).forEach(n=>{const e=document.createElement('div');e.className='net';
 e.innerHTML='<span>'+esc(n.ssid)+' <span class="sub">'+n.rssi+' dBm'+(n.open?' open':'')+'</span></span>';const g=document.createElement('span');g.className='row';[0,1].forEach(i=>{const b=document.createElement('button');b.className='sec';b.textContent='Use as '+(i+1);

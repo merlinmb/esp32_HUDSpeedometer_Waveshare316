@@ -41,15 +41,87 @@ Settings include HUD mode, mirroring, gauge style, digit size, the HUD test grid
 
 Once connected, open `http://ex30-speedo.local` or the device's IP address. The settings page configures the HUD (with live sliders for the windscreen shape), Wi-Fi, colours, rotation, units, GPS rate, the standstill cut-off, speed offset, speed alerts, automatic trip reset, API telemetry, time zone, and OTA password. Wi-Fi setup can also be started from the device settings menu.
 
-For a USB serial console at 115200 baud, use commands such as:
+Settings can also be changed from a laptop over USB serial; see [Serial Console](#serial-console).
+
+## Serial Console
+
+Connect over USB at 115200 baud with any serial monitor (for example the PlatformIO monitor) and type a command followed by Enter. Type `help` for the list.
+
+### Wi-Fi and device commands
 
 ```text
-wifi1 "Phone hotspot" "password"
-wifi2 "Home Wi-Fi" "password"
-status
+wifi1 "Phone hotspot" "password"   save Network 1 (phone hotspot)
+wifi2 "Home Wi-Fi" "password"      save Network 2 (home)
+clear1 / clear2                    forget Network 1 / 2
+ota "new-password"                 OTA password, 6+ characters (applies after reboot)
+status                             networks, Wi-Fi, hostname and GPS state
+reboot                             restart the device
 ```
 
-Other commands include `clear1`, `clear2`, `ota "new-password"`, and `reboot`.
+### Settings
+
+Every setting on the web page can be read and changed over serial. The keys are the same as in the `/api/settings` JSON; nested keys use a dot (`hud.gauge`, `day.speed`). Changes apply at once and are saved.
+
+```text
+get                          all settings as JSON
+get hud.gauge                one value
+set <key> <value>            change a value
+set simSpeed on              booleans take on/off, 1/0, true/false, yes/no
+set alertLimit 70
+set hud.colour #FF8000
+set tz "GMT0BST,M3.5.0/1,M10.5.0"   quote values that contain spaces
+reset config                 defaults for everything except Wi-Fi networks, OTA password and trip
+```
+
+After each `set` the stored value is printed. Values out of range are clamped, and values of the wrong type are ignored, so the printed value shows what was actually saved. The web page's *Reset settings to defaults* button does the same as `reset config` (`POST /api/settings/reset`).
+
+| Key | Values |
+| --- | --- |
+| `units` | 0 mph, 1 km/h |
+| `rotation` | 0 normal (USB right), 2 turned 180° |
+| `design` | 0 A Clean, 1 B Gauge, 2 B Gauge solid, 3 C Info, 4 D Night |
+| `autoNight` | on/off: switch to D after dark |
+| `nightBelowDeg` | -18 to 10: sun angle for night |
+| `brightMode` | 0 auto by sun, 1 fixed |
+| `fixedLevel` | 0 to 4: 100, 75, 50, 30, 15 % |
+| `gpsHz` | 1, 5 or 10 |
+| `smoothing` | 0 low, 1 medium, 2 high |
+| `fixSettleSec` | 0 to 30: speed ignored after a new fix |
+| `startSpeedMs` | 0.6 to 3.0 m/s: speed needed to leave standstill |
+| `startHoldMs` | 0 to 5000: ...for this long |
+| `speedOffset` | -10 to 10 display units |
+| `alertMode` | 0 off, 1 visual, 2 visual reminder |
+| `alertLimit` | 0 (off) to 200 display units |
+| `idleDimMin` | 0 (never) to 60 minutes stopped before dimming |
+| `idleOffMin` | 0 (stay dim) to 60 minutes after dimming before screen off |
+| `resetTripOnSleep` | on/off |
+| `simSpeed` | on/off: see [Speed simulation](#speed-simulation) |
+| `wifiEnabled`, `preferHome` | on/off |
+| `telemetryEnabled` | on/off |
+| `apiUrl` | text, up to 159 characters |
+| `apiToken` | text (write only, never printed) |
+| `otaPass` | text, 6+ characters (write only) |
+| `sampleSec` | 1 to 600 |
+| `uploadSec` | 2 to 3600 |
+| `deviceName` | text: hostname, `<name>.local` |
+| `tz` | POSIX time zone |
+| `day.<colour>`, `night.<colour>` | `#RRGGBB`; colours: `background`, `speed`, `unit`, `ringTrack`, `ringFill`, `status`, `statusIcon`, `info`, `alert`, `tickMajor`, `tickMinor`, `tickLabel`, `limitMark` |
+| `hud.enabled`, `hud.mirrorV`, `hud.mirrorH` | on/off |
+| `hud.showUnits`, `hud.showLimit`, `hud.showClock`, `hud.showGps` | on/off |
+| `hud.testGrid` | on/off (not saved) |
+| `hud.gauge` | 0 off, 1 bar, 2 segments |
+| `hud.digitSize` | 0 medium, 1 large |
+| `hud.gaugeMax` | 0 (auto) to 300 |
+| `hud.colour`, `hud.nightColour`, `hud.alertColour` | `#RRGGBB` |
+| `hud.scaleX`, `hud.scaleY` | 0.5 to 1.5 |
+| `hud.keystone`, `hud.taper`, `hud.bow`, `hud.skew` | -0.5 to 0.5 |
+| `hud.rotateDeg` | -15 to 15 |
+| `hud.offsetX` | -300 to 300 px |
+| `hud.offsetY` | -150 to 150 px |
+
+## Speed simulation
+
+*Simulated speed* on the web page (or `set simSpeed on`) replaces the GPS speed with a sweep from 0 to about 80 mph and back every 40 seconds, so the displays, gauge and speed alert can be tested indoors without a fix. It is off by default but is saved, so it stays on after a restart until switched off. While it is on the screen shows **SIMULATED SPEED**, and the trip and API telemetry are not updated.
 
 ## OTA and Secrets
 

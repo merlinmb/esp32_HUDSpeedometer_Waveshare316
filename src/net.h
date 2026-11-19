@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 // Wi-Fi client (phone hotspot etc.), setup hotspot with captive web page,
 // and the same web page on the car's network for changing colours and settings.
@@ -14,6 +15,10 @@ bool netConnected();
 String netSsid();
 String netIp();
 int netRssi();
+
+// Settings as JSON, the same keys for the web API (/api/settings) and the serial console.
+void settingsJson(JsonDocument& d);
+void settingsFromJson(JsonObject in);   // changes only the keys present, clamps values; does not save
 
 // Set by the web page when settings change; main loop applies and clears it.
 extern volatile bool netSettingsChanged;

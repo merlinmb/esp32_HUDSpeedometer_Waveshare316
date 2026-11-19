@@ -27,7 +27,11 @@ The LCD uses the ESP-IDF RGB panel driver with bounce buffers and two frame buff
 
 ## Controls
 
-- Short press BOOT on the driving screen: step through the designs A, B1, B2, C, D and the HUD.
+- Short press BOOT on the driving screen: step through the designs Clean, Night and the HUD gauge design. All three are drawn for the windscreen reflection (mirrored and shaped as set for the HUD), with the speed centred:
+  - Clean: speed with a thin bar, in the day colour theme.
+  - Night: speed with a row of dots, in the low-blue night colour theme. With *Auto night* on, Night (and the HUD gauge design's night colours) take over when the sun is low.
+  - HUD gauge: speed with a bar, segments or no gauge, an optional limit marker (see [docs/hud.md](docs/hud.md)).
+  - The top line shows messages, and the clock and NO GPS warning if they are turned on in the HUD settings.
 - Hold BOOT for 1 second: open settings.
 - In settings, short press changes the current value; hold for 1 second advances to the next item.
 - Hold BOOT for 3 seconds in settings to save and exit.
@@ -35,7 +39,7 @@ The LCD uses the ESP-IDF RGB panel driver with bounce buffers and two frame buff
 
 The first press while the display is dimmed or off only wakes it. The screen dims after the configured stopped interval and can turn off later; driving or pressing BOOT wakes it. GPS, Wi-Fi, and telemetry continue while the backlight is off.
 
-Settings include HUD mode, mirroring, gauge style, digit size, the HUD test grid, rotation, units, display selection, day/night colours, automatic or fixed brightness, screen timeout, GPS rate, smoothing, speed offset, visual speed alerts, Wi-Fi, telemetry, and whether the trip resets when the screen turns off. Speed alerts are displayed on screen; this board build has no vibration motor or speaker.
+Settings include the HUD gauge design, mirroring, gauge style, digit size, the HUD test grid, rotation, units, display selection, day/night colours, automatic or fixed brightness, screen timeout, GPS rate, smoothing, speed offset, visual speed alerts, Wi-Fi, telemetry, and whether the trip resets when the screen turns off. Speed alerts are displayed on screen; this board build has no vibration motor or speaker.
 
 ## Wi-Fi and Settings
 
@@ -68,7 +72,9 @@ get hud.gauge                one value
 set <key> <value>            change a value
 set simSpeed on              booleans take on/off, 1/0, true/false, yes/no
 set alertLimit 70
-set hud.colour #FF8000
+set theme 2                  screen design 1 Clean, 2 Night (turns the HUD gauge design off)
+set dayPreset Ice            colour theme by name or number
+set day.speed #FF8000        or a single colour
 set tz "GMT0BST,M3.5.0/1,M10.5.0"   quote values that contain spaces
 reset config                 defaults for everything except Wi-Fi networks, OTA password and trip
 ```
@@ -79,8 +85,10 @@ After each `set` the stored value is printed. Values out of range are clamped, a
 | --- | --- |
 | `units` | 0 mph, 1 km/h |
 | `rotation` | 0 normal (USB right), 2 turned 180° |
-| `design` | 0 A Clean, 1 B Gauge, 2 B Gauge solid, 3 C Info, 4 D Night |
-| `autoNight` | on/off: switch to D after dark |
+| `design` | 0 Clean, 1 Night |
+| `dayPreset` | day colour theme (Clean and the HUD gauge design by day): 0 Teal, 1 Ice, 2 Lime, 3 Orange, 4 Volvo, 5 Mono, or the name |
+| `nightPreset` | night colour theme (Night and the HUD gauge design after dark): 0 Amber, 1 Red, 2 Green, 3 "Dim white", or the name |
+| `autoNight` | on/off: switch to Night after dark |
 | `nightBelowDeg` | -18 to 10: sun angle for night |
 | `brightMode` | 0 auto by sun, 1 fixed |
 | `fixedLevel` | 0 to 4: 100, 75, 50, 30, 15 % |
@@ -112,7 +120,6 @@ After each `set` the stored value is printed. Values out of range are clamped, a
 | `hud.gauge` | 0 off, 1 bar, 2 segments |
 | `hud.digitSize` | 0 medium, 1 large |
 | `hud.gaugeMax` | 0 (auto) to 300 |
-| `hud.colour`, `hud.nightColour`, `hud.alertColour` | `#RRGGBB` |
 | `hud.scaleX`, `hud.scaleY` | 0.5 to 1.5 |
 | `hud.keystone`, `hud.taper`, `hud.bow`, `hud.skew` | -0.5 to 0.5 |
 | `hud.rotateDeg` | -15 to 15 |

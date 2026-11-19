@@ -91,9 +91,6 @@ static void hudToJson(JsonObject o, const HudSettings& h) {
   o["showGps"] = h.showGps;
   o["digitSize"] = h.digitSize;
   o["gaugeMax"] = h.gaugeMax;
-  o["colour"] = hex6(h.colour);
-  o["nightColour"] = hex6(h.nightColour);
-  o["alertColour"] = hex6(h.alertColour);
   o["scaleX"] = h.scaleX;
   o["scaleY"] = h.scaleY;
   o["keystone"] = h.keystone;
@@ -121,9 +118,6 @@ static bool hudFromJson(JsonObject o, HudSettings& h) {
   if (o["showGps"].is<bool>()) n.showGps = o["showGps"];
   if (o["digitSize"].is<int>()) n.digitSize = constrain(o["digitSize"].as<int>(), 0, 1);
   if (o["gaugeMax"].is<int>()) n.gaugeMax = constrain(o["gaugeMax"].as<int>(), 0, 300);
-  n.colour = parseHex(o["colour"], n.colour);
-  n.nightColour = parseHex(o["nightColour"], n.nightColour);
-  n.alertColour = parseHex(o["alertColour"], n.alertColour);
   if (o["scaleX"].is<float>()) n.scaleX = o["scaleX"];
   if (o["scaleY"].is<float>()) n.scaleY = o["scaleY"];
   if (o["keystone"].is<float>()) n.keystone = o["keystone"];
@@ -143,6 +137,8 @@ static bool hudFromJson(JsonObject o, HudSettings& h) {
 void settingsJson(JsonDocument& d) {
   d["units"] = (int)settings.units;
   d["design"] = settings.design;
+  d["dayPreset"] = settings.dayPreset;
+  d["nightPreset"] = settings.nightPreset;
   d["autoNight"] = settings.autoNight;
   d["nightBelowDeg"] = settings.nightBelowDeg;
   d["brightMode"] = (int)settings.brightMode;
@@ -187,6 +183,14 @@ static void copyStr(char* dst, size_t n, const char* src) {
   dst[n - 1] = 0;
 }
 
+// Theme by index or by name (any case), -1 if neither.
+static int presetIndex(JsonVariant v, int count, const char* (*name)(int)) {
+  if (v.is<int>()) return v.as<int>() >= 0 && v.as<int>() < count ? v.as<int>() : -1;
+  if (v.is<const char*>())
+    for (int i = 0; i < count; i++) if (!strcasecmp(v.as<const char*>(), name(i))) return i;
+  return -1;
+}
+
 // Changes only the fields present; out-of-range values are clamped. Shared by the web page
 // and the serial console. Does not save.
 void settingsFromJson(JsonObject in) {
@@ -219,6 +223,11 @@ void settingsFromJson(JsonObject in) {
   if (in["uploadSec"].is<int>()) settings.uploadSec = constrain(in["uploadSec"].as<int>(), 2, 3600);
   if (in["deviceName"].is<const char*>() && strlen(in["deviceName"]) > 0) copyStr(settings.deviceName, sizeof(settings.deviceName), in["deviceName"]);
   if (in["tz"].is<const char*>() && strlen(in["tz"]) > 0) copyStr(settings.tz, sizeof(settings.tz), in["tz"]);
+  // A theme first, so single colours sent with it (the web page's Save) still apply on top
+  int dp = presetIndex(in["dayPreset"], dayPresetCount(), dayPresetName);
+  if (dp >= 0) applyDayPreset(dp);
+  int np = presetIndex(in["nightPreset"], nightPresetCount(), nightPresetName);
+  if (np >= 0) applyNightPreset(np);
   coloursFromJson(in["day"], settings.day);
   coloursFromJson(in["night"], settings.night);
   hudFromJson(in["hud"], settings.hud);

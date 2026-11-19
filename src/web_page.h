@@ -54,7 +54,7 @@ button.sec{background:#25303a;color:var(--txt)}
 
 <section><h2>Head-up display</h2>
 <p class="sub">Lay the screen on the dashboard under the windscreen and read the speed in its reflection. Changes below show on the screen straight away; press <b>Save HUD</b> to keep them.</p>
-<label>HUD mode (off = dashboard designs)<input type="checkbox" id="h_enabled"></label>
+<label>HUD gauge design (off = the Clean or Night design below)<input type="checkbox" id="h_enabled"></label>
 <label>Mirror top to bottom (screen's top edge towards the windscreen)<input type="checkbox" id="h_mirrorV"></label>
 <label>Mirror left to right<input type="checkbox" id="h_mirrorH"></label>
 <label>Speed gauge<select id="h_gauge"><option value="0">Off</option><option value="1">Bar</option><option value="2">Segments</option></select></label>
@@ -64,9 +64,7 @@ button.sec{background:#25303a;color:var(--txt)}
 <label>Show alert limit on gauge<input type="checkbox" id="h_showLimit"></label>
 <label>Show clock<input type="checkbox" id="h_showClock"></label>
 <label>Warn when there is no GPS fix<input type="checkbox" id="h_showGps"></label>
-<label>Colour<input type="color" id="h_colour"></label>
-<label>Colour after dark (with Auto night)<input type="color" id="h_nightColour"></label>
-<label>Over the limit<input type="color" id="h_alertColour"></label>
+<p class="sub">HUD colours come from the colour theme: Day by day, Night after dark when <i>Switch to Night automatically after dark</i> is on.</p>
 <h3 style="font-size:15px;margin:16px 0 4px">Windscreen shape</h3>
 <label>Show test grid while adjusting<input type="checkbox" id="h_testGrid"></label>
 <p class="sub">Turn on the grid, sit in the driving position and adjust until its lines look straight, level and evenly spaced in the windscreen.</p>
@@ -77,8 +75,8 @@ button.sec{background:#25303a;color:var(--txt)}
 <section><h2>Display</h2>
 <label>Rotation<select id="rotation"><option value="0">Normal (USB on the right)</option><option value="2">180&deg; (USB on the left)</option></select></label>
 <label>Units<select id="units"><option value="0">mph</option><option value="1">km/h</option></select></label>
-<label>Design<select id="design"><option value="0">A Clean</option><option value="1">B Gauge</option><option value="2">B Gauge solid</option><option value="3">C Info</option><option value="4">D Night</option></select></label>
-<label>Switch to D automatically at night<input type="checkbox" id="autoNight"></label>
+<label>Design<select id="design"><option value="0">Clean</option><option value="1">Night</option></select></label>
+<label>Switch to Night automatically after dark<input type="checkbox" id="autoNight"></label>
 <label>Night below sun angle (deg)<input type="number" id="nightBelowDeg" step="0.5" min="-18" max="10"></label>
 <label>Brightness<select id="brightMode"><option value="0">Auto by sun</option><option value="1">Fixed</option></select></label>
 <label>Fixed level<select id="fixedLevel"><option value="0">100%</option><option value="1">75%</option><option value="2">50%</option><option value="3">30%</option><option value="4">15%</option></select></label>
@@ -97,7 +95,7 @@ button.sec{background:#25303a;color:var(--txt)}
 </section>
 
 <section><h2>Colours</h2>
-<div class="tabs"><button id="tday" onclick="tab('day')">Day (A, B, C)</button><button id="tnight" class="sec" onclick="tab('night')">Night (D)</button></div>
+<div class="tabs"><button id="tday" onclick="tab('day')">Day (Clean, HUD)</button><button id="tnight" class="sec" onclick="tab('night')">Night (Night, HUD after dark)</button></div>
 <div class="prev"><svg id="pv" width="220" height="220" viewBox="0 0 466 466" aria-label="Preview"></svg></div>
 <div class="row" id="presets" style="margin-bottom:8px"></div>
 <div id="colours"></div>
@@ -132,7 +130,7 @@ const HS=[['scaleX','Width',0.5,1.5,0.01,1],['scaleY','Height (rake squashes it)
 ['bow','Curvature (+ ends lower)',-0.5,0.5,0.01,0],['skew','Skew (+ top leans right)',-0.5,0.5,0.01,0],
 ['rotateDeg','Rotate (deg, + clockwise)',-15,15,0.1,0],['offsetX','Move (+ right, px)',-300,300,1,0],['offsetY','Move (+ down, px)',-150,150,1,0]];
 const HC=['enabled','mirrorV','mirrorH','showUnits','showLimit','showClock','showGps','testGrid'];
-const HN=['gauge','gaugeMax','digitSize'];const HK=['colour','nightColour','alertColour'];
+const HN=['gauge','gaugeMax','digitSize'];
 let hudBusy=false,hudPend=null;
 function hudSend(o){hudPend=Object.assign(hudPend||{},o);if(!hudBusy)hudFlush()}
 async function hudFlush(){if(!hudPend)return;const b=hudPend;hudPend=null;hudBusy=true;
@@ -142,10 +140,9 @@ HS.forEach(([k,n,mi,ma,st])=>{const d=document.createElement('div');d.className=
 d.innerHTML='<span>'+n+'</span><input type="range" id="h_'+k+'" min="'+mi+'" max="'+ma+'" step="'+st+'"><output id="o_'+k+'"></output>';box.appendChild(d);
 const i=d.querySelector('input');i.oninput=()=>{$('o_'+k).textContent=i.value;hudSend({[k]:Number(i.value)})}});
 HC.forEach(k=>$('h_'+k).onchange=()=>hudSend({[k]:$('h_'+k).checked}));
-HN.forEach(k=>$('h_'+k).onchange=()=>hudSend({[k]:Number($('h_'+k).value)}));
-HK.forEach(k=>$('h_'+k).oninput=()=>hudSend({[k]:$('h_'+k).value}))}
+HN.forEach(k=>$('h_'+k).onchange=()=>hudSend({[k]:Number($('h_'+k).value)}))}
 function hudShow(){const h=S.hud||{};HS.forEach(([k])=>{$('h_'+k).value=h[k];$('o_'+k).textContent=h[k]});
-HC.forEach(k=>$('h_'+k).checked=!!h[k]);HN.forEach(k=>$('h_'+k).value=h[k]);HK.forEach(k=>$('h_'+k).value=h[k])}
+HC.forEach(k=>$('h_'+k).checked=!!h[k]);HN.forEach(k=>$('h_'+k).value=h[k])}
 function hudSave(){hudSend({save:true});toast('HUD saved')}
 function hudReset(){const o={};HS.forEach(([k,,,,,z])=>o[k]=z);hudSend(o);Object.assign(S.hud,o);hudShow()}
 async function load(){S=await get('/api/settings');P=await get('/api/presets');
@@ -159,7 +156,8 @@ function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;
 function tab(t){cur=t;$('tday').className=t=='day'?'':'sec';$('tnight').className=t=='night'?'':'sec';
 const c=S[t];const box=$('colours');box.innerHTML='';
 EL.forEach(([k,n])=>{const l=document.createElement('label');l.textContent=n;const i=document.createElement('input');i.type='color';i.value=c[k];i.oninput=()=>{c[k]=i.value;preview()};l.appendChild(i);box.appendChild(l)});
-const pr=$('presets');pr.innerHTML='<span class="sub">Presets:</span>';(P[t]||[]).forEach(p=>{const b=document.createElement('button');b.className='sec';b.textContent=p.name;b.onclick=()=>{S[t]=Object.assign({},p.c);tab(t)};pr.appendChild(b)});
+const k=t+'Preset',pr=$('presets');pr.innerHTML='<span class="sub">Theme (applies at once):</span>';(P[t]||[]).forEach((p,i)=>{const b=document.createElement('button');b.className=S[k]==i?'':'sec';b.textContent=p.name;
+b.onclick=async()=>{const r=await post('/api/settings',{[k]:i});S[t]=r[t];S[k]=r[k];tab(t);toast(p.name+' theme')};pr.appendChild(b)});
 preview()}
 function pol(r,d){const a=d*Math.PI/180;return[233+r*Math.sin(a),233-r*Math.cos(a)]}
 function arc(r,a0,a1){const p0=pol(r,a0),p1=pol(r,a1);return`M${p0[0]} ${p0[1]}A${r} ${r} 0 ${a1-a0>180?1:0} 1 ${p1[0]} ${p1[1]}`}

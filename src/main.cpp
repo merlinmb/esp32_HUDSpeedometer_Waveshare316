@@ -1,7 +1,7 @@
 // EX30 GPS speedometer for the Waveshare ESP32-S3-LCD-3.16.
 // Normally a head-up display (HUD): the screen lies on the dashboard and the speed is read
 // as a reflection in the windscreen. The geometry is set live from the web page.
-// Short press steps through the dashboard designs and the HUD; hold opens settings. In settings, short press changes a
+// Short press steps through the designs (Clean, Night, HUD gauge), all drawn for the reflection; hold opens settings. In settings, short press changes a
 // value, hold advances to the next item, and a 3 s hold saves and exits.
 // Stopped for 'Dim screen' minutes -> dims; 'Screen off' minutes later -> display off.
 // Movement over ~3 mph for 3 s or the BOOT key wakes it.
@@ -88,7 +88,7 @@ static void vUnits(char* b, size_t n) { snprintf(b, n, "%s", settings.units == U
 static void cUnits() { settings.units = settings.units == Units::MPH ? Units::KMH : Units::MPH; settings.alertLimit = 0; }
 static void vDesign(char* b, size_t n) { snprintf(b, n, "%s", designName(settings.design)); }
 static void cDesign() { settings.design = (settings.design + 1) % DESIGN_COUNT; }
-static void vAutoNight(char* b, size_t n) { snprintf(b, n, "%s", settings.autoNight ? "On (D after dark)" : "Off"); }
+static void vAutoNight(char* b, size_t n) { snprintf(b, n, "%s", settings.autoNight ? "On (Night after dark)" : "Off"); }
 static void cAutoNight() { settings.autoNight = !settings.autoNight; }
 static void vDayCol(char* b, size_t n) { snprintf(b, n, "%s", dayPresetName(settings.dayPreset)); }
 static void cDayCol() { applyDayPreset(settings.dayPreset + 1); }
@@ -157,7 +157,7 @@ static void resetTrip();
 static void vTrip(char* b, size_t n) { snprintf(b, n, "Short press to reset"); }
 static void cTrip() { resetTrip(); showToast("Trip reset"); }
 
-static void vHud(char* b, size_t n) { snprintf(b, n, "%s", settings.hud.enabled ? "On (windscreen)" : "Off (dashboard)"); }
+static void vHud(char* b, size_t n) { snprintf(b, n, "%s", settings.hud.enabled ? "On (gauge)" : "Off (Clean / Night)"); }
 static void cHud() { settings.hud.enabled = !settings.hud.enabled; }
 static void vMirror(char* b, size_t n) {
   const HudSettings& h = settings.hud;
@@ -185,7 +185,7 @@ static void vTripSleep(char* b, size_t n) { snprintf(b, n, "%s", settings.resetT
 static void cTripSleep() { settings.resetTripOnSleep = !settings.resetTripOnSleep; }
 
 static const MenuItem MENU[] = {
-  {"HUD mode", vHud, cHud},
+  {"HUD gauge design", vHud, cHud},
   {"HUD mirror", vMirror, cMirror},
   {"HUD gauge", vGauge, cGauge},
   {"HUD digits", vDigits, cDigits},
@@ -387,6 +387,7 @@ static void handleButton(uint8_t event) {
 //   set simSpeed on          set alertLimit 70           set hud.colour #FF8000
 //   set tz "GMT0BST,M3.5.0/1,M10.5.0"   (quote values that contain spaces)
 //   reset config             defaults for everything except Wi-Fi networks, OTA password and trip
+//   set theme 1-2            screen design 1 Clean, 2 Night (turns the HUD gauge design off)
 static int splitArgs(char* line, char* argv[], int max) {
   int n = 0;
   char* p = line;
@@ -491,6 +492,19 @@ static void serialConsole() {
     } else if (cmd == "get") {
       if (argc >= 2) printSetting(argv[1]);
       else { JsonDocument d; settingsJson(d); serializeJsonPretty(d, Serial); Serial.println(); }
+    } else if (cmd == "set" && argc >= 3 && !strcasecmp(argv[1], "theme")) {
+      // Screen design 1 Clean, 2 Night; leaves the HUD gauge design so it shows
+      int n = atoi(argv[2]);
+      if (n < 1 || n > DESIGN_COUNT) {
+        Serial.printf("theme must be 1 to %d\n", DESIGN_COUNT);
+      } else {
+        settings.design = n - 1;
+        settings.hud.enabled = false;
+        if (autoNightActive()) nightPick = n - 1;   // also show it now if night has switched to D
+        settingsSave();
+        applySettingsChanges();
+        Serial.printf("theme = %d (%s)\n", n, designName(n - 1));
+      }
     } else if (cmd == "set" && argc >= 3) {
       setSetting(argv[1], argv[2]);
     } else if (cmd == "reset" && argc >= 2 && !strcasecmp(argv[1], "config")) {
@@ -504,6 +518,7 @@ static void serialConsole() {
     } else {
       Serial.println("Commands: wifi1 \"name\" \"pass\" | wifi2 \"name\" \"pass\" | clear1 | clear2 | ota \"pass\" | status | reboot");
       Serial.println("Settings: get | get <key> | set <key> <value> | reset config   (keys as in 'get', nested as hud.gauge)");
+      Serial.println("Screen: set theme 1-2   (1 Clean, 2 Night; turns the HUD gauge design off)");
     }
   }
 }

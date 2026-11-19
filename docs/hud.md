@@ -17,12 +17,10 @@ curvature, 0.05 skew and -1.5 degrees rotation.
 
 1. Put the screen face up on the dashboard in front of the driver, as close to the bottom
    of the windscreen as it will go. The default **Mirror top to bottom** setting expects
-   the screen's top edge (the edge above the speed digits on the dashboard designs)
-   towards the windscreen.
+   the screen's top edge towards the windscreen.
 2. If you mount it with the bottom edge towards the windscreen instead, turn on
    **Mirror left to right** and turn off **Mirror top to bottom**. If the USB lead has to
-   come out of the other side, use **Rotation 180°**: it turns the HUD and the dashboard
-   designs together.
+   come out of the other side, use **Rotation 180°**: it turns every screen together.
 3. A reflection off plain glass is faint in daylight. A strip of HUD reflective film on the
    inside of the windscreen gives a much brighter image and removes the faint second
    image from the outer surface of the glass.
@@ -63,7 +61,7 @@ the change is not stored and is lost at the next restart.
 
 ## What is shown
 
-By default the HUD only shows the speed and a speed gauge, in white on black. Each part
+By default the HUD only shows the speed and a speed gauge, in the colour theme's colours on black. Each part
 can be changed on the settings page:
 
 | Option | Choices | Default |
@@ -72,19 +70,24 @@ can be changed on the settings page:
 | Gauge full scale | 0 (120 mph or 200 km/h), or any value up to 300 | 0 |
 | Digit size | Medium (220 px font), large (300 px font) | Large |
 | Show units | MPH or KM/H to the right of the digits | On |
-| Show alert limit on gauge | Red marker at the alert limit (Display: Alert limit) | On |
+| Show alert limit on gauge | Marker at the alert limit (Display: Alert limit) | On |
 | Show clock | Clock in the top-left corner | Off |
 | Warn when there is no GPS fix | NO GPS / NO GPS FIX in the top-right corner | On |
-| Colour | Digits and gauge | White |
-| Colour after dark | Used instead when *Switch to D automatically at night* is on and the sun is down | Green |
-| Over the limit | Digits and gauge above the alert limit | Red |
+
+The colours come from the colour theme (Colours on the settings page, or `set dayPreset` /
+`set nightPreset` over serial): the Day theme by day, and the Night theme (Amber by default)
+when *Switch to Night automatically after dark* is on and the sun is down. The digits use the
+theme's speed colour, the gauge its ring colour, the limit marker its limit colour, and
+digits and gauge turn the alert colour above the limit. The background is always black.
 
 Black pixels on an LCD still let some backlight through, so at night the whole screen can
 show as a faint grey rectangle. Lower the brightness, or let *Auto by sun* do it.
 
-On the device, hold BOOT for the settings menu. *HUD mode*, *HUD mirror*, *HUD gauge*,
+On the device, hold BOOT for the settings menu. *HUD gauge design*, *HUD mirror*, *HUD gauge*,
 *HUD digits*, *HUD test grid* and *Rotation* are at the top. A short press on the driving
-screen steps through the designs: A, B1, B2, C, D, HUD, then back to A.
+screen steps through the designs: Clean, Night, HUD gauge, then back to Clean. All of them
+go through the mirror and shape settings, and the clock, units, digit size and NO GPS
+options apply to all of them; the gauge options apply to the HUD gauge design only.
 
 The settings menu, status page and firmware update screen are also shown through the HUD
 mirror and shape. The Wi-Fi setup page is not, so its QR code can be scanned from the

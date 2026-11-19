@@ -21,7 +21,7 @@
 Settings settings;
 
 static constexpr uint32_t SETTINGS_MAGIC = 0x53504431;  // "SPD1"
-static constexpr uint16_t SETTINGS_VERSION = 6;
+static constexpr uint16_t SETTINGS_VERSION = 7;   // 7: designs B1, B2 and C removed (same layout as 6)
 static constexpr size_t SETTINGS_V4_SIZE = offsetof(Settings, fixSettleSec);  // v5 only appended fields
 static constexpr size_t SETTINGS_V5_SIZE = offsetof(Settings, simSpeed);      // v6 only appended fields
 
@@ -80,15 +80,20 @@ void settingsLoad() {
   uint32_t magic = p.getUInt("magic", 0);
   uint16_t ver = p.getUShort("ver", 0);
   size_t len = p.getBytesLength("cfg");
-  if (magic == SETTINGS_MAGIC && ver == SETTINGS_VERSION && len == sizeof(Settings)) {
+  bool loaded = true;
+  if (magic == SETTINGS_MAGIC && (ver == SETTINGS_VERSION || ver == 6) && len == sizeof(Settings)) {
     p.getBytes("cfg", &settings, sizeof(Settings));
   } else if (magic == SETTINGS_MAGIC && ver == 5 && len == SETTINGS_V5_SIZE) {
     p.getBytes("cfg", &settings, len);
   } else if (magic == SETTINGS_MAGIC && ver == 4 && len == SETTINGS_V4_SIZE) {
     // Version 4: everything up to the trip; the newer fields keep their defaults
     p.getBytes("cfg", &settings, len);
+  } else {
+    loaded = false;
   }
   p.end();
+  // Before version 7 the designs were A, B1, B2, C, D (0-4): D becomes Night, the rest Clean
+  if (loaded && ver < 7) settings.design = settings.design == 4 ? DESIGN_D : DESIGN_A;
   // Sanity checks in case of a partly written blob
   if (settings.design >= DESIGN_COUNT) settings.design = DESIGN_A;
   if (settings.gpsHz != 1 && settings.gpsHz != 5 && settings.gpsHz != 10) settings.gpsHz = 10;
@@ -121,9 +126,6 @@ void hudSanitise(HudSettings& h) {
   if ((uint8_t)h.gauge > 2) h.gauge = HudGauge::Bar;
   if (h.digitSize > 1) h.digitSize = 1;
   if (h.gaugeMax > 300) h.gaugeMax = 0;
-  h.colour &= 0xFFFFFF;
-  h.nightColour &= 0xFFFFFF;
-  h.alertColour &= 0xFFFFFF;
   h.scaleX = clampf(h.scaleX, 0.5f, 1.5f, 1.0f);
   h.scaleY = clampf(h.scaleY, 0.5f, 1.5f, 1.0f);
   h.keystone = clampf(h.keystone, -0.5f, 0.5f, 0.0f);
@@ -160,7 +162,7 @@ void settingsResetConfig() {
 }
 
 const char* designName(uint8_t d) {
-  static const char* N[DESIGN_COUNT] = {"A Clean", "B Gauge", "B Gauge solid", "C Info", "D Night"};
+  static const char* N[DESIGN_COUNT] = {"Clean", "Night"};
   return N[d < DESIGN_COUNT ? d : 0];
 }
 

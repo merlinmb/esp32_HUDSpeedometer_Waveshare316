@@ -7,9 +7,6 @@
 
 static constexpr int WIDTH = 820;
 static constexpr int HEIGHT = 320;
-static constexpr int SPEED_X = 260;
-static constexpr int SPEED_BASE = 234;   // baseline of the speed digits (they rise 214 px above it)
-static constexpr int SIDE_X = 540;       // left edge of the right-hand column
 
 static lgfx::LGFX_Sprite canvas;            // the back frame buffer, rotated to landscape
 static lgfx::LGFX_Sprite* g = &canvas;       // what the draw functions draw on
@@ -23,6 +20,10 @@ static uint16_t color565(uint32_t color) {
   return lgfx::color565((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
 }
 
+static uint16_t scaleColour(uint32_t c, float k) {
+  return lgfx::color565(((c >> 16) & 0xFF) * k, ((c >> 8) & 0xFF) * k, (c & 0xFF) * k);
+}
+
 static const ThemeColours& activeTheme(const UiModel& model) {
   return model.night ? settings.night : settings.day;
 }
@@ -33,58 +34,6 @@ static void drawText(const char* text, int x, int y, const lgfx::VLWfont* font,
   g->setTextDatum(datum);
   g->setTextColor(color);
   g->drawString(text, x, y);
-}
-
-static void drawValue(int x, int y, const char* label, const char* value,
-                      const char* unit, const ThemeColours& theme) {
-  drawText(label, x, y, &fSmall, color565(theme.status));
-  char text[28];
-  snprintf(text, sizeof(text), "%s %s", value, unit);
-  drawText(text, x, y + 34, &fTitle, color565(theme.speed));
-}
-
-static void drawDriving(const UiModel& model) {
-  const ThemeColours& theme = activeTheme(model);
-  const uint16_t background = color565(theme.background);
-  const uint16_t accent = color565(model.overLimit ? theme.alert : theme.ringFill);
-  g->fillScreen(background);
-
-  char status[48];
-  if (!model.gpsConnected) snprintf(status, sizeof(status), "NO GPS  |  %s", model.clock);
-  else if (!model.fix) snprintf(status, sizeof(status), "SEARCHING  |  %u SATS  |  %s", model.sats, model.clock);
-  else snprintf(status, sizeof(status), "GPS FIX  |  %u SATS  |  %.0f HZ  |  %s", model.sats, model.hz, model.clock);
-  drawText(status, SIDE_X, 26, &fSmall, color565(theme.status));
-  g->drawFastHLine(SIDE_X, 48, WIDTH - 20 - SIDE_X, color565(theme.ringTrack));
-
-  char speed[12];
-  if (model.fix && model.speed > 0) snprintf(speed, sizeof(speed), "%d", model.speed);
-  else strcpy(speed, "--");   // no fix, or below the standstill cut-off
-  drawText(speed, SPEED_X, SPEED_BASE, &fSpeedM,
-           model.fix ? color565(model.overLimit ? theme.alert : theme.speed) : color565(theme.ringTrack),
-           textdatum_t::baseline_center);
-  drawText(model.units, SPEED_X, 258, &fLabel, color565(theme.unit), textdatum_t::middle_center);
-
-  if (model.limit > 0) {
-    int meterWidth = 470;
-    g->drawRoundRect(25, 277, meterWidth, 10, 5, color565(theme.ringTrack));
-    if (model.fix && model.ringMax > 0) {
-      int fill = constrain((int)(meterWidth * model.ringValue / model.ringMax), 0, meterWidth);
-      if (fill) g->fillRoundRect(25, 277, fill, 10, 5, accent);
-    }
-    char limit[28];
-    snprintf(limit, sizeof(limit), "LIMIT %d %s", model.limit, model.units);
-    drawText(limit, 25, 304, &fSmall, color565(theme.info));
-  }
-  if (model.toast[0]) drawText(model.toast, 495, 304, &fSmall, accent, textdatum_t::middle_right);
-
-  drawValue(SIDE_X, 86, "TRIP", model.tripVal, model.tripUnit, theme);
-  drawValue(676, 86, "MAX", model.maxVal, model.units, theme);
-  drawValue(SIDE_X, 180, "AVERAGE", model.avgVal, model.units, theme);
-  drawValue(676, 180, "ALTITUDE", model.altVal, "m", theme);
-  drawText(model.heading, SIDE_X, 270, &fSmall, color565(theme.info));
-  char bright[20];
-  snprintf(bright, sizeof(bright), "LIGHT %u%%", model.brightPct);
-  drawText(bright, 790, 270, &fSmall, color565(theme.info), textdatum_t::middle_right);
 }
 
 static void drawSettings(const UiModel& model) {
@@ -248,12 +197,18 @@ static constexpr int GAUGE_SEGMENTS = 24;
 
 // Everything the HUD shows, reduced to what changes the picture, so small changes in the
 // model (ring value in quarter units) only redraw when a pixel would change.
+// The driving designs share one layout and are all drawn here: Clean (thin bar, day theme),
+// Night (row of dots, night theme) and the HUD gauge design (bar / segments / off).
+static constexpr uint8_t LOOK_HUD = 0xFF;    // HudFrame::look for the HUD gauge design
+static constexpr int NIGHT_DOTS = 46;
+
 struct HudFrame {
+  uint8_t look;          // DESIGN_A, DESIGN_D or LOOK_HUD
   char speed[8];
   char clock[8];
   char toast[40];
   bool fix, gpsConnected, overLimit, night;
-  int16_t fill;          // gauge fill in pixels, or lit segments
+  int16_t fill;          // gauge fill in pixels, or lit segments / dots
   int16_t limitX;        // limit marker x, or -1
 };
 
@@ -263,15 +218,13 @@ static HudSettings hudShownSettings;
 static uint8_t hudShownRotation = 0xFF;
 static bool hudShownGrid = false;
 static Overlay hudShownOverlay = Overlay::None;
+static ThemeColours hudShownTheme;
 
-static int hudBaseline(const HudSettings& h) { return h.gauge == HudGauge::Off ? 292 : 258; }
-static Region hudDigitsRegion(const HudSettings& h) {
-  int top = 40, bottom = h.gauge == HudGauge::Off ? HEIGHT : 266;
+static bool hasGauge(uint8_t look, const HudSettings& h) { return look != LOOK_HUD || h.gauge != HudGauge::Off; }
+static int hudBaseline(uint8_t look, const HudSettings& h) { return hasGauge(look, h) ? 258 : 292; }
+static Region hudDigitsRegion(uint8_t look, const HudSettings& h) {
+  int top = 40, bottom = hasGauge(look, h) ? 266 : HEIGHT;
   return {0, (int16_t)top, WIDTH, (int16_t)(bottom - top)};
-}
-
-static uint16_t scaleColour(uint32_t c, float k) {
-  return lgfx::color565(((c >> 16) & 0xFF) * k, ((c >> 8) & 0xFF) * k, (c & 0xFF) * k);
 }
 
 static HudFrame hudFrame(const UiModel& m, const HudSettings& h) {
@@ -286,19 +239,30 @@ static HudFrame hudFrame(const UiModel& m, const HudSettings& h) {
   f.overLimit = m.overLimit;
   f.night = m.night;
   f.limitX = -1;
-  if (h.gauge != HudGauge::Off && m.ringMax > 0) {
+  f.look = m.hud ? LOOK_HUD : m.design;
+  if (m.ringMax > 0) {
     float frac = m.fix ? constrain(m.ringValue / m.ringMax, 0.0f, 1.0f) : 0;
-    f.fill = h.gauge == HudGauge::Bar ? (int16_t)lroundf(frac * GAUGE_W) : (int16_t)ceilf(frac * GAUGE_SEGMENTS - 0.01f);
-    if (h.showLimit && m.limit > 0 && m.limit < m.ringMax) f.limitX = GAUGE_X + (int)lroundf(GAUGE_W * m.limit / m.ringMax);
+    if (f.look == DESIGN_A) {
+      f.fill = (int16_t)lroundf(frac * GAUGE_W);
+    } else if (f.look == DESIGN_D) {
+      f.fill = m.fix && m.ringValue > 0.5f ? min(NIGHT_DOTS, (int)(frac * (NIGHT_DOTS - 1)) + 1) : 0;
+    } else if (h.gauge != HudGauge::Off) {
+      f.fill = h.gauge == HudGauge::Bar ? (int16_t)lroundf(frac * GAUGE_W) : (int16_t)ceilf(frac * GAUGE_SEGMENTS - 0.01f);
+      if (h.showLimit && m.limit > 0 && m.limit < m.ringMax) f.limitX = GAUGE_X + (int)lroundf(GAUGE_W * m.limit / m.ringMax);
+    }
   }
   return f;
 }
 
 static void drawHud(const UiModel& m, const HudSettings& h, const HudFrame& f, bool grid) {
-  uint32_t main = f.night ? h.nightColour : h.colour;
-  uint16_t fg = color565(main);
-  uint16_t dim = scaleColour(main, 0.28f);
-  uint16_t alert = color565(h.alertColour);
+  // Colours from the day or night theme. The background stays black: black shows nothing
+  // in the windscreen.
+  const ThemeColours& t = f.night ? settings.night : settings.day;
+  uint16_t fg = color565(t.speed);
+  uint16_t dim = scaleColour(t.speed, 0.28f);
+  uint16_t gaugeFg = color565(t.ringFill);
+  uint16_t gaugeDim = scaleColour(t.ringFill, 0.28f);
+  uint16_t alert = color565(t.alert);
   g->fillScreen(TFT_BLACK);
 
   if (grid) {
@@ -319,38 +283,46 @@ static void drawHud(const UiModel& m, const HudSettings& h, const HudFrame& f, b
   }
 
   // Top line: clock (left), GPS warning (right), messages (centre)
-  if (f.clock[0]) drawText(f.clock, 20, 20, &fTitle, fg, textdatum_t::middle_left);
+  if (f.clock[0]) drawText(f.clock, 20, 20, &fTitle, color565(t.status), textdatum_t::middle_left);
   if (h.showGps && !f.fix)
     drawText(f.gpsConnected ? "NO GPS FIX" : "NO GPS", WIDTH - 20, 20, &fTitle, alert, textdatum_t::middle_right);
-  if (f.toast[0]) drawText(f.toast, WIDTH / 2, 20, &fTitle, fg, textdatum_t::middle_center);
+  if (f.toast[0]) drawText(f.toast, WIDTH / 2, 20, &fTitle, color565(t.ringFill), textdatum_t::middle_center);
 
   // Speed digits, centred; units to their right
   const lgfx::VLWfont* font = h.digitSize ? &fSpeedM : &fSpeed;
   uint16_t digits = !f.fix ? dim : (f.overLimit ? alert : fg);
-  int base = hudBaseline(h);
+  int base = hudBaseline(f.look, h);
   drawText(f.speed, WIDTH / 2, base, font, digits, textdatum_t::baseline_center);
   if (h.showUnits) {
     g->setFont(font);
     int half = g->textWidth(f.speed) / 2;
-    drawText(m.units, WIDTH / 2 + half + 14, base, &fTitle, f.overLimit ? alert : fg, textdatum_t::baseline_left);
+    drawText(m.units, WIDTH / 2 + half + 14, base, &fTitle, f.overLimit ? alert : color565(t.unit), textdatum_t::baseline_left);
   }
 
   // Gauge
-  uint16_t fill = f.overLimit ? alert : fg;
-  if (h.gauge == HudGauge::Bar) {
-    g->drawRect(GAUGE_X - 3, GAUGE_Y - 3, GAUGE_W + 6, GAUGE_H + 6, dim);
-    g->drawRect(GAUGE_X - 2, GAUGE_Y - 2, GAUGE_W + 4, GAUGE_H + 4, dim);
+  uint16_t fill = f.overLimit ? alert : gaugeFg;
+  if (f.look == DESIGN_A) {
+    g->fillRoundRect(GAUGE_X, 285, GAUGE_W, 8, 4, gaugeDim);
+    if (f.fill >= 8) g->fillRoundRect(GAUGE_X, 285, f.fill, 8, 4, fill);
+  } else if (f.look == DESIGN_D) {
+    for (int i = 0; i < NIGHT_DOTS; i++) {
+      bool on = i < f.fill;
+      g->fillCircle(GAUGE_X + GAUGE_W * i / (NIGHT_DOTS - 1), 289, on ? 4 : 3, on ? fill : gaugeDim);
+    }
+  } else if (h.gauge == HudGauge::Bar) {
+    g->drawRect(GAUGE_X - 3, GAUGE_Y - 3, GAUGE_W + 6, GAUGE_H + 6, gaugeDim);
+    g->drawRect(GAUGE_X - 2, GAUGE_Y - 2, GAUGE_W + 4, GAUGE_H + 4, gaugeDim);
     if (f.fill > 0) g->fillRect(GAUGE_X, GAUGE_Y, f.fill, GAUGE_H, fill);
   } else if (h.gauge == HudGauge::Segments) {
     int pitch = GAUGE_W / GAUGE_SEGMENTS, gap = 6;
     for (int i = 0; i < GAUGE_SEGMENTS; i++) {
       int x = GAUGE_X + i * pitch;
       if (i < f.fill) g->fillRect(x, GAUGE_Y, pitch - gap, GAUGE_H, fill);
-      else g->drawRect(x, GAUGE_Y, pitch - gap, GAUGE_H, dim);
+      else g->drawRect(x, GAUGE_Y, pitch - gap, GAUGE_H, gaugeDim);
     }
   }
   if (f.limitX >= 0) {
-    g->fillRect(f.limitX - 3, GAUGE_Y - 12, 6, GAUGE_H + 24, alert);
+    g->fillRect(f.limitX - 3, GAUGE_Y - 12, 6, GAUGE_H + 24, color565(t.limitMark));
   }
 }
 
@@ -379,7 +351,7 @@ static bool renderHud(const UiModel& m) {
   g = &hudSrc;
   bool fullSource = all || !driving || hudShownOverlay != Overlay::None || m.testGrid != hudShownGrid ||
                     memcmp(&h, &hudShownSettings, sizeof(h)) || strcmp(m.units, shown.units) ||
-                    f.night != hudShown.night;
+                    f.night != hudShown.night || f.look != hudShown.look || memcmp(&activeTheme(m), &hudShownTheme, sizeof(ThemeColours));
   if (!driving) {
     switch (m.overlay) {
       case Overlay::Settings: drawSettings(m); break;
@@ -402,8 +374,8 @@ static bool renderHud(const UiModel& m) {
     };
     redraw(strcmp(f.clock, o.clock) || strcmp(f.toast, o.toast) || f.fix != o.fix ||
            f.gpsConnected != o.gpsConnected, H_TOP);
-    redraw(strcmp(f.speed, o.speed) || f.fix != o.fix || f.overLimit != o.overLimit, hudDigitsRegion(h));
-    if (h.gauge != HudGauge::Off)
+    redraw(strcmp(f.speed, o.speed) || f.fix != o.fix || f.overLimit != o.overLimit, hudDigitsRegion(f.look, h));
+    if (hasGauge(f.look, h))
       redraw(f.fill != o.fill || f.limitX != o.limitX || f.overLimit != o.overLimit, H_GAUGE);
   }
   g = &canvas;
@@ -429,6 +401,7 @@ static bool renderHud(const UiModel& m) {
   hudShownRotation = settings.rotation;
   hudShownGrid = m.testGrid;
   hudShownOverlay = m.overlay;
+  hudShownTheme = activeTheme(m);
   return true;
 }
 
@@ -460,104 +433,32 @@ void uiBegin() {
   }
 }
 
-// ---------------- partial updates ----------------
-// The panel streams the frame buffer out of PSRAM continuously. Redrawing the whole frame
-// on every change adds so much PSRAM traffic that the stream falls behind and the image
-// shakes. Like LVGL, only the areas whose data changed are redrawn. The regions don't cut
-// through any element that changes.
-static constexpr Region R_FULL   = {0, 0, WIDTH, HEIGHT};
-static constexpr Region R_STATUS = {520, 0, WIDTH - 520, 48};     // status line (rule at y 48 is static)
-static constexpr Region R_SPEED  = {36, 12, 448, 230};            // speed digits (up to 3 x 138 px wide)
-static constexpr Region R_METER  = {0, 272, 520, 20};             // speed bar
-static constexpr Region R_FOOTER = {0, 292, 520, 28};             // limit and toast
-static constexpr Region R_VALUES = {520, 49, WIDTH - 520, 207};   // trip / max / average / altitude
-static constexpr Region R_INFO   = {520, 256, WIDTH - 520, 64};   // heading and light
-static constexpr int MAX_DIRTY = 6;
-
-static ThemeColours shownTheme;
-static bool shownValid = false;
-static bool shownHud = false;
-static uint8_t shownRotation = 0;
-static Region lastDirty[MAX_DIRTY];
-static int lastDirtyCount = 0;
-
-static bool needsFullRedraw(const UiModel& m) {
-  return !shownValid || shownHud || settings.rotation != shownRotation ||
-         m.overlay != Overlay::None || shown.overlay != Overlay::None ||
-         m.night != shown.night || strcmp(m.units, shown.units) ||
-         memcmp(&activeTheme(m), &shownTheme, sizeof(ThemeColours));
-}
-
-// Copies a region between frame buffers. With the canvas rotated 3 (USB connector on the
-// right), logical (x, y) is stored at native column y, row LCD_HEIGHT - 1 - x, so each
-// logical column is one native row span. Rotated 1 (turned 180), it is native column
-// LCD_WIDTH - 1 - y, row x.
-static void copyRegion(uint16_t* dst, const uint16_t* src, const Region& r, uint8_t rotation) {
-  int nx = rotation == 2 ? LCD_WIDTH - (r.y + r.h) : r.y;
-  int row0 = rotation == 2 ? r.x : LCD_HEIGHT - (r.x + r.w);
-  for (int row = row0; row < row0 + r.w; row++)
-    memcpy(dst + row * LCD_WIDTH + nx, src + row * LCD_WIDTH + nx, r.h * sizeof(uint16_t));
-}
-
-static void renderDashboard(const UiModel& model) {
-  uint16_t* back = boardBackBuffer();
-  // The back buffer still holds the frame before last: bring the areas that changed last
-  // time up to date from the frame on screen, then draw only what changed now.
-  for (int i = 0; i < lastDirtyCount; i++) copyRegion(back, boardFrontBuffer(), lastDirty[i], shownRotation);
-  canvas.setBuffer(back, LCD_WIDTH, LCD_HEIGHT);
+// ---------------- unwarped screens ----------------
+// The Wi-Fi setup page (so its QR code can be scanned from the screen), and everything if the
+// HUD buffers could not be allocated. Always a full redraw: these change rarely.
+static void renderDirect(const UiModel& model) {
+  canvas.setBuffer(boardBackBuffer(), LCD_WIDTH, LCD_HEIGHT);
   canvas.setRotation(settings.rotation == 2 ? 1 : 3);
   g = &canvas;
-
-  Region dirty[MAX_DIRTY];
-  int n = 0;
-  if (needsFullRedraw(model)) {
-    switch (model.overlay) {
-      case Overlay::Settings: drawSettings(model); break;
-      case Overlay::Status: drawStatus(model); break;
-      case Overlay::WifiSetup: drawWifiSetup(model); break;
-      case Overlay::Update: drawUpdate(model); break;
-      default: drawDriving(model); break;
+  switch (model.overlay) {
+    case Overlay::Settings: drawSettings(model); break;
+    case Overlay::Status: drawStatus(model); break;
+    case Overlay::WifiSetup: drawWifiSetup(model); break;
+    case Overlay::Update: drawUpdate(model); break;
+    default: {
+      const HudSettings h = settings.hud;
+      drawHud(model, h, hudFrame(model, h), model.testGrid);
+      break;
     }
-    dirty[n++] = R_FULL;
-  } else {
-    const UiModel& m = model;
-    const UiModel& o = shown;
-    auto redraw = [&](bool changed, const Region& r) {
-      if (!changed) return;
-      g->setClipRect(r.x, r.y, r.w, r.h);
-      drawDriving(model);
-      g->clearClipRect();
-      dirty[n++] = r;
-    };
-    redraw(m.gpsConnected != o.gpsConnected || m.fix != o.fix || m.sats != o.sats ||
-           m.hz != o.hz || strcmp(m.clock, o.clock), R_STATUS);
-    redraw(m.fix != o.fix || m.speed != o.speed || m.overLimit != o.overLimit, R_SPEED);
-    redraw(m.fix != o.fix || m.ringValue != o.ringValue || m.ringMax != o.ringMax ||
-           m.overLimit != o.overLimit || m.limit != o.limit, R_METER);
-    redraw(m.limit != o.limit || strcmp(m.toast, o.toast) || m.overLimit != o.overLimit, R_FOOTER);
-    redraw(strcmp(m.tripVal, o.tripVal) || strcmp(m.tripUnit, o.tripUnit) ||
-           strcmp(m.maxVal, o.maxVal) || strcmp(m.avgVal, o.avgVal) || strcmp(m.altVal, o.altVal),
-           R_VALUES);
-    redraw(strcmp(m.heading, o.heading) || m.brightPct != o.brightPct, R_INFO);
   }
-  if (n) boardPresent();
-
-  memcpy(lastDirty, dirty, sizeof(Region) * n);
-  lastDirtyCount = n;
-  shownTheme = activeTheme(model);
-  shownRotation = settings.rotation;
-  shownValid = true;
-  shownHud = false;
+  boardPresent();
 }
 
 void uiRender(const UiModel& model) {
-  // The Wi-Fi setup page is shown unwarped so its QR code can be scanned from the screen.
-  bool hud = model.hud && model.overlay != Overlay::WifiSetup;
-  if (hud && renderHud(model)) {
-    shownHud = true;
-  } else {
-    hudShownValid = false;   // the dashboard overwrites the frame buffers
-    renderDashboard(model);
+  // Every driving design is drawn for the windscreen reflection (mirrored and warped).
+  if (model.overlay == Overlay::WifiSetup || !renderHud(model)) {
+    hudShownValid = false;   // this overwrites the frame buffers
+    renderDirect(model);
   }
   shown = model;
 }
